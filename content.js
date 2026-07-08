@@ -1,4 +1,4 @@
-// FB Alert Content Script v4.8.6 — fix port disconnect false-kill on SW idle
+// FB Alert Content Script v4.8.9 — keepalive port reconnect + audio resume fix + TG dedup fix
 (function () {
   'use strict';
 
@@ -25,6 +25,11 @@
   // chrome.runtime.id becomes undefined immediately on invalidation — faster than port disconnect
   function alive() { return !_dead && !!(chrome.runtime && chrome.runtime.id); }
 
+  // SPA navigation guard: kill if page changed to a non-inbox/messenger URL
+  function onValidPage() {
+    return location.pathname.includes('/inbox') || location.pathname.includes('/messenger');
+  }
+
   // Global backstop: catch uncatchable async/constructor context errors
   window.addEventListener('unhandledrejection', (ev) => {
     if (isContextError(ev.reason)) { ev.preventDefault(); killScript(); }
@@ -33,14 +38,20 @@
     if (isContextError(ev.error)) { ev.preventDefault(); killScript(); }
   }, true);
 
-  try {
-    const _port = chrome.runtime.connect({ name: 'fb-alert-cs' });
-    // Only kill on true context invalidation; SW idle disconnect must be ignored
-    _port.onDisconnect.addListener(() => { if (!alive()) killScript(); });
-  } catch (e) {
-    killScript();
-    return;
+  // Auto-reconnect port when SW wakes from sleep; only kill on true context invalidation
+  function connectPort() {
+    try {
+      const port = chrome.runtime.connect({ name: 'fb-alert-cs' });
+      port.onDisconnect.addListener(() => {
+        if (!alive()) { killScript(); return; }
+        // SW went to sleep — reconnect after 1s to re-establish channel
+        setTimeout(() => { if (alive()) connectPort(); }, 1000);
+      });
+    } catch (e) {
+      if (isContextError(e)) killScript();
+    }
   }
+  connectPort();
 
   function safeSend(msg) {
     if (!alive()) return;
@@ -160,6 +171,28 @@
     return s <= e ? (cur >= s && cur < e) : (cur >= s || cur < e);
   }
 
+  // Original v4.6 beep: 880→1100→880Hz oscillator, 0.6s (Web Audio API)
+  // resume() must complete before scheduling notes — ctx.currentTime is frozen while suspended
+  function playOriginalBeep() {
+    try {
+      const ctx = new AudioContext();
+      ctx.resume().then(() => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        const t = ctx.currentTime;
+        osc.frequency.setValueAtTime(880, t);
+        osc.frequency.setValueAtTime(1100, t + 0.12);
+        osc.frequency.setValueAtTime(880, t + 0.24);
+        gain.gain.setValueAtTime(0.6, t);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.6);
+        osc.start(t);
+        osc.stop(t + 0.6);
+      }).catch(() => {});
+    } catch (e) {}
+  }
+
   function playAudioInContent(force) {
     try {
       if (!alive()) return;
@@ -169,13 +202,14 @@
         try {
           if (!alive()) return;
           const choice = d.soundChoice || '1';
-          let url;
+          if (choice === '1') { playOriginalBeep(); return; }
           if (choice === 'custom' && d.customSoundB64) {
-            url = `data:${d.customSoundMime || 'audio/mpeg'};base64,${d.customSoundB64}`;
-          } else {
-            const n = ['1', '2', '3'].includes(choice) ? choice : '1';
-            url = chrome.runtime.getURL(`sound${n}.wav`);  // throws if context dead
+            const url = `data:${d.customSoundMime || 'audio/mpeg'};base64,${d.customSoundB64}`;
+            new Audio(url).play().catch(() => {});
+            return;
           }
+          const n = ['2', '3'].includes(choice) ? choice : '2';
+          const url = chrome.runtime.getURL(`sound${n}.wav`);
           new Audio(url).play().catch(() => {});
         } catch (e) { if (isContextError(e)) killScript(); }
       });
@@ -275,9 +309,12 @@
         const prev = threadState[key];
         if (data.unread) hasAnyUnread = true;
         const isOutgoing = data.messageText.startsWith('你:') || data.messageText.startsWith('You:');
-        const isNewMessage = _firstScanDone && data.unread && !isOutgoing && (!prev ||
-          (data.dataUtime > 0 && data.dataUtime > (prev.dataUtime || 0)) ||
-          (data.messageText && data.messageText !== prev.previewText));
+        // Only notify on truly new messages: new thread or newer timestamp
+        // Removed messageText diff — FB re-renders text each scan causing false duplicates
+        const isNewMessage = _firstScanDone && data.unread && !isOutgoing && (
+          !prev ||
+          (data.dataUtime > 0 && data.dataUtime > (prev.dataUtime || 0))
+        );
         if (isNewMessage && shouldNotify(data.sender, data.messageText, data.dataUtime)) {
           const pageName = getPageName();
           sendTelegram(pageName, data.sender, data.messageText);
@@ -295,6 +332,7 @@
 
   // ─── Init ────────────────────────────────────────────────────
   function safeCall(fn) {
+    if (!onValidPage()) return;  // SPA nav away from inbox: skip but preserve _notified state
     try { fn(); } catch (e) { if (isContextError(e)) killScript(); }
   }
 

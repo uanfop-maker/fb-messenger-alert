@@ -78,14 +78,34 @@ $('saveBtn').addEventListener('click', () => {
   chrome.storage.local.set({ soundChoice: _soundChoice }, () => showStatus('✅ 已儲存'));
 });
 
+// Original v4.6 beep: 880→1100→880Hz oscillator (Web Audio API)
+function playOriginalBeepInPopup() {
+  const ctx = new AudioContext();
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+  osc.frequency.setValueAtTime(880, ctx.currentTime);
+  osc.frequency.setValueAtTime(1100, ctx.currentTime + 0.12);
+  osc.frequency.setValueAtTime(880, ctx.currentTime + 0.24);
+  gain.gain.setValueAtTime(0.6, ctx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.6);
+  osc.start(ctx.currentTime);
+  osc.stop(ctx.currentTime + 0.6);
+}
+
 // ─── Test sound (plays directly in popup — user gesture context) ──
 $('testSoundBtn').addEventListener('click', () => {
+  if (_soundChoice === '1') {
+    try { playOriginalBeepInPopup(); showStatus('🔔 音效測試中…'); } catch (e) { showStatus('❌ 音效播放失敗', true); }
+    return;
+  }
   chrome.storage.local.get(['customSoundB64', 'customSoundMime'], (d) => {
     let url;
     if (_soundChoice === 'custom' && d.customSoundB64) {
       url = `data:${d.customSoundMime || 'audio/mpeg'};base64,${d.customSoundB64}`;
     } else {
-      const n = ['1', '2', '3'].includes(_soundChoice) ? _soundChoice : '1';
+      const n = ['2', '3'].includes(_soundChoice) ? _soundChoice : '2';
       url = chrome.runtime.getURL(`sound${n}.wav`);
     }
     new Audio(url).play().catch(e => showStatus('❌ 音效播放失敗', true));

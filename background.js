@@ -1,6 +1,6 @@
 'use strict';
-// FB Alert Background Service Worker v4.8.6
-// Audio is now played directly by content.js; background only manages continuous-mode alarms
+// FB Alert Background Service Worker v4.8.9
+// Audio is now played directly by content.js; background manages alarms + keepalive
 
 let _s = {};
 chrome.storage.sync.get(null, (d) => { _s = d || {}; });
@@ -10,6 +10,9 @@ chrome.storage.onChanged.addListener((changes, area) => {
     updateAlarms();
   }
 });
+
+// Keep SW alive every 24s so Chrome doesn't terminate it and kill content script ports
+chrome.alarms.create('keepalive', { periodInMinutes: 0.4 });
 
 let _hasUnread = false;
 
@@ -43,6 +46,7 @@ function updateAlarms() {
 }
 
 chrome.alarms.onAlarm.addListener(async (alarm) => {
+  if (alarm.name === 'keepalive') return; // just wakes SW, nothing to do
   if (alarm.name !== 'beepAlarm') return;
   if (!_hasUnread) { chrome.alarms.clear('beepAlarm'); return; }
   if (!inSleepWindow()) await playSound();
@@ -74,7 +78,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   if (msg.type === 'TEST_TG') {
     const { botToken, chatId, threadId } = msg;
-    const body = { chat_id: chatId, text: '✅ FB Messenger 提醒 v4.8.6 測試成功！' };
+    const body = { chat_id: chatId, text: '✅ FB Messenger 提醒 v4.8.9 測試成功！' };
     if (threadId) body.message_thread_id = parseInt(threadId, 10);
     fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
       method: 'POST',
