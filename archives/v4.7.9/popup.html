@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FB Messenger 提醒設定</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Noto Sans TC', sans-serif;
+  background: #18191b; color: #e4e6eb;
+  width: 320px; padding: 16px;
+}
+h2 { font-size: 15px; font-weight: 700; margin-bottom: 14px; color: #fff; }
+.section { margin-bottom: 14px; }
+.section-title { font-size: 11px; font-weight: 600; color: #888; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 8px; }
+label { display: flex; align-items: center; justify-content: space-between; font-size: 13px; color: #ccc; margin-bottom: 10px; }
+label span { flex: 1; }
+input[type="text"], input[type="password"], input[type="time"], input[type="number"] {
+  width: 100%; background: #242526; border: 1px solid #3a3b3c;
+  border-radius: 6px; color: #e4e6eb; font-size: 13px;
+  padding: 8px 10px; outline: none; margin-bottom: 8px; transition: border-color .15s;
+}
+input[type="text"]:focus, input[type="password"]:focus,
+input[type="time"]:focus, input[type="number"]:focus { border-color: #0866ff; }
+input[type="number"] { width: 70px; margin-bottom: 0; }
+.toggle { position: relative; width: 38px; height: 22px; flex-shrink: 0; }
+.toggle input { opacity: 0; width: 0; height: 0; }
+.slider {
+  position: absolute; inset: 0;
+  background: #3a3b3c; border-radius: 22px; cursor: pointer; transition: background .2s;
+}
+.slider:before {
+  content: ''; position: absolute;
+  width: 16px; height: 16px; left: 3px; top: 3px;
+  background: #fff; border-radius: 50%; transition: transform .2s;
+}
+input:checked + .slider { background: #0866ff; }
+input:checked + .slider:before { transform: translateX(16px); }
+/* Radio mode buttons */
+.radio-group { display: flex; gap: 6px; margin-bottom: 8px; }
+.radio-btn {
+  flex: 1; padding: 7px 4px; text-align: center; font-size: 12px;
+  border: 1px solid #3a3b3c; border-radius: 6px; cursor: pointer;
+  background: #242526; color: #aaa; transition: all .15s;
+}
+.radio-btn.active { border-color: #0866ff; background: #0866ff22; color: #6ab5ff; }
+.row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.row label { margin-bottom: 0; }
+.row span { font-size: 13px; color: #ccc; white-space: nowrap; }
+.btn {
+  width: 100%; padding: 9px; background: #0866ff; color: #fff;
+  border: none; border-radius: 8px; font-size: 13px; font-weight: 600;
+  cursor: pointer; margin-top: 4px;
+}
+.btn:hover { background: #0554d4; }
+.btn.sec { background: #3a3b3c; margin-top: 6px; }
+.btn.sec:hover { background: #4a4b4c; }
+.btn-row { display: flex; gap: 6px; margin-top: 4px; }
+.btn-row .btn { flex: 1; }
+.status { font-size: 12px; color: #4caf50; margin-top: 8px; min-height: 16px; text-align: center; }
+.status.error { color: #e05252; }
+hr { border: none; border-top: 1px solid #3a3b3c; margin: 12px 0; }
+.hint { font-size: 11px; color: #666; margin-top: 4px; line-height: 1.5; }
+.hidden { display: none; }
+.ver { font-size: 10px; color: #444; text-align: right; margin-top: 10px; }
+.sound-row { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+.sound-name { flex: 1; font-size: 12px; color: #aaa; background: #242526; border: 1px solid #3a3b3c; border-radius: 6px; padding: 7px 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sound-upload-btn { background: #3a3b3c; border: none; border-radius: 6px; color: #e4e6eb; cursor: pointer; font-size: 12px; padding: 7px 11px; white-space: nowrap; transition: background .15s; }
+.sound-upload-btn:hover { background: #4a4b4c; }
+.sound-clear-btn { background: none; border: 1px solid #3a3b3c; border-radius: 6px; color: #888; cursor: pointer; font-size: 12px; padding: 7px 10px; white-space: nowrap; transition: all .15s; flex-shrink: 0; }
+.sound-clear-btn:hover { color: #e05252; border-color: #e05252; }
+</style>
+</head>
+<body>
+<h2>📨 FB Messenger 提醒 <span style="font-size:11px;color:#555;font-weight:400">v4.7.9</span></h2>
+
+<div class="section">
+  <label>
+    <span>啟用插件</span>
+    <div class="toggle"><input type="checkbox" id="enabled"><label for="enabled" class="slider"></label></div>
+  </label>
+  <label>
+    <span>📲 轉發到 Telegram</span>
+    <div class="toggle"><input type="checkbox" id="tgEnabled"><label for="tgEnabled" class="slider"></label></div>
+  </label>
+</div>
+
+<hr>
+
+<div class="section">
+  <div class="section-title">Telegram 設定</div>
+  <input type="password" id="botToken" placeholder="Bot Token（8xxxxxxxx:AAA...）" autocomplete="off">
+  <input type="text" id="chatId" placeholder="Chat ID（群組填 -100xxxxxxxxx）" autocomplete="off">
+  <input type="text" id="threadId" placeholder="Thread ID（論壇群組才需要，例如 11）" autocomplete="off">
+  <p class="hint">Bot Token 從 @BotFather 取得。群組 Chat ID 可用 @userinfobot 查詢，論壇群組 Thread ID 看 Topic URL。</p>
+</div>
+
+<hr>
+
+<div class="section">
+  <div class="section-title">音效模式</div>
+  <div class="radio-group">
+    <div class="radio-btn" data-mode="off">🔇 關閉</div>
+    <div class="radio-btn" data-mode="once">🔔 單次</div>
+    <div class="radio-btn" data-mode="continuous">🔁 持續</div>
+  </div>
+  <div id="intervalRow" class="row hidden">
+    <span>持續間隔：每</span>
+    <input type="number" id="beepIntervalSec" min="5" max="300" value="15">
+    <span>秒播放一次</span>
+  </div>
+</div>
+
+<hr>
+
+<div class="section">
+  <div class="section-title">睡眠模式（靜音但仍傳 TG）</div>
+  <div class="row">
+    <span>靜音時段：</span>
+    <input type="time" id="sleepStart" style="width:110px">
+    <span>到</span>
+    <input type="time" id="sleepEnd" style="width:110px">
+  </div>
+  <p class="hint">設定後，在該時段內不播放音效，但 Telegram 通知仍正常傳送。留空代表停用。</p>
+</div>
+
+<hr>
+
+<div class="section">
+  <div class="section-title">自訂音效</div>
+  <div class="sound-row">
+    <span id="soundName" class="sound-name">預設音效（嗶嗶聲）</span>
+    <label class="sound-upload-btn">📂 上傳<input type="file" id="soundFile" accept="audio/*" style="display:none"></label>
+    <button class="sound-clear-btn" id="clearSound" style="display:none">✕</button>
+  </div>
+  <p class="hint">支援 MP3、WAV、OGG 等音頻格式（上限 5MB）</p>
+</div>
+
+<button class="btn" id="saveBtn">儲存設定</button>
+
+<div class="btn-row">
+  <button class="btn sec" id="testSoundBtn">🔔 測試音效</button>
+  <button class="btn sec" id="testTgBtn">📲 測試 TG</button>
+</div>
+
+<div class="status" id="status"></div>
+<div class="ver">v4.7.9</div>
+
+<script src="popup.js"></script>
+</body>
+</html>
