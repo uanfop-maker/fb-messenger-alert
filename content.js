@@ -1,8 +1,8 @@
-// FB Alert Content Script v4.9.0 — singleton AudioContext unlocked by user gesture
+// FB Alert Content Script v4.10.0
+// Fixes: H1 SPA soft-reset / H2 system-notification fallback / M2 offscreen dedup / M3 utime=0 edge
 (function () {
   'use strict';
 
-  // Only activate on FB Business inbox/messenger pages
   if (!location.pathname.includes('/inbox') && !location.pathname.includes('/messenger')) return;
 
   // ─── Context invalidation guard ───────────────────────────────
@@ -22,15 +22,12 @@
     return msg.includes('Extension context') || msg.includes('extension context');
   }
 
-  // chrome.runtime.id becomes undefined immediately on invalidation — faster than port disconnect
   function alive() { return !_dead && !!(chrome.runtime && chrome.runtime.id); }
 
-  // SPA navigation guard: kill if page changed to a non-inbox/messenger URL
   function onValidPage() {
     return location.pathname.includes('/inbox') || location.pathname.includes('/messenger');
   }
 
-  // Global backstop: catch uncatchable async/constructor context errors
   window.addEventListener('unhandledrejection', (ev) => {
     if (isContextError(ev.reason)) { ev.preventDefault(); killScript(); }
   });
@@ -38,13 +35,11 @@
     if (isContextError(ev.error)) { ev.preventDefault(); killScript(); }
   }, true);
 
-  // Auto-reconnect port when SW wakes from sleep; only kill on true context invalidation
   function connectPort() {
     try {
       const port = chrome.runtime.connect({ name: 'fb-alert-cs' });
       port.onDisconnect.addListener(() => {
         if (!alive()) { killScript(); return; }
-        // SW went to sleep — reconnect after 1s to re-establish channel
         setTimeout(() => { if (alive()) connectPort(); }, 1000);
       });
     } catch (e) {
@@ -55,9 +50,7 @@
 
   function safeSend(msg) {
     if (!alive()) return;
-    try {
-      chrome.runtime.sendMessage(msg).catch(() => {});
-    } catch (e) {
+    try { chrome.runtime.sendMessage(msg).catch(() => {}); } catch (e) {
       if (isContextError(e)) killScript();
     }
   }
@@ -66,10 +59,12 @@
   const threadState = {};
   let _cfg = {};
   let _pageName = '';
+  let _firstScanDone = false;
+  let _lastTitleCount = 0;
+  let _currentAssetId = '';
 
   const _notified = new Map();
   function shouldNotify(sender, messageText, dataUtime) {
-    // Use dataUtime (message timestamp) as key when available — stable across re-renders
     const key = (dataUtime > 0) ? `${sender}|${dataUtime}` : `${sender}|${messageText}`;
     const now = Date.now();
     for (const [k, ts] of _notified) { if (now - ts > 300000) _notified.delete(k); }
@@ -78,11 +73,33 @@
     return true;
   }
 
+  // H1: Soft-reset all per-page state when SPA navigates to a different fan page
+  function getCurrentAssetId() {
+    const m = location.href.match(/asset_id=(\d+)/);
+    return m ? m[1] : '';
+  }
+
+  function softReset() {
+    for (const k of Object.keys(threadState)) delete threadState[k];
+    _notified.clear();
+    _pageName = '';
+    _firstScanDone = false;
+    _lastTitleCount = getTitleCount();
+  }
+
+  function checkAssetId() {
+    const id = getCurrentAssetId();
+    if (id && _currentAssetId && id !== _currentAssetId) {
+      _currentAssetId = id;
+      softReset();
+    } else if (id && !_currentAssetId) {
+      _currentAssetId = id;
+    }
+  }
+
   function reloadCfg() {
     if (!alive()) return;
-    try {
-      chrome.storage.sync.get(null, (d) => { _cfg = d || {}; });
-    } catch (e) {
+    try { chrome.storage.sync.get(null, (d) => { _cfg = d || {}; }); } catch (e) {
       if (isContextError(e)) killScript();
     }
   }
@@ -158,7 +175,7 @@
     } catch (e) { return null; }
   }
 
-  // ─── Audio (played directly in page context) ─────────────────
+  // ─── Audio ─────────────────────────────────────────────────────
   function inSleepWindow() {
     const { sleepStart, sleepEnd } = _cfg;
     if (!sleepStart || !sleepEnd) return false;
@@ -171,7 +188,6 @@
     return s <= e ? (cur >= s && cur < e) : (cur >= s || cur < e);
   }
 
-  // Singleton AudioContext — created once, unlocked by first user gesture on the FB page
   let _actx = null;
   function _getCtx() {
     if (!_actx) {
@@ -179,7 +195,6 @@
     }
     return _actx;
   }
-  // Unlock on any user interaction so ctx.state becomes 'running'
   ['click', 'keydown', 'pointerdown'].forEach(function (ev) {
     document.addEventListener(ev, function _unlock() {
       const c = _getCtx();
@@ -188,8 +203,11 @@
     }, { once: true, passive: true, capture: true });
   });
 
-  // Original v4.6 beep: 880→1100→880Hz oscillator, 0.6s
-  // Falls back to sound1.wav if AudioContext is still suspended (no user gesture yet)
+  function isAudioBlocked() {
+    const ctx = _getCtx();
+    return !ctx || ctx.state === 'suspended';
+  }
+
   function playOriginalBeep() {
     try {
       const ctx = _getCtx();
@@ -228,19 +246,28 @@
             return;
           }
           const n = ['2', '3'].includes(choice) ? choice : '2';
-          const url = chrome.runtime.getURL(`sound${n}.wav`);
-          new Audio(url).play().catch(() => {});
+          new Audio(chrome.runtime.getURL(`sound${n}.wav`)).play().catch(() => {});
         } catch (e) { if (isContextError(e)) killScript(); }
       });
     } catch (e) { if (isContextError(e)) killScript(); }
   }
 
-  // Listen for alarm-triggered audio from background (continuous mode)
   try {
     chrome.runtime.onMessage.addListener((msg) => {
       if (msg.type === 'PLAY_AUDIO') playAudioInContent(true);
     });
   } catch (e) {}
+
+  // ─── Notification helper ──────────────────────────────────────
+  // H2: when AudioContext suspended (before user gesture), fall back to system notification
+  function fireNotification(sender, messageText) {
+    if (!isAudioBlocked()) return;
+    safeSend({
+      type: 'SHOW_NOTIFICATION',
+      title: `FB 私訊：${sender || '訪客'}`,
+      body: messageText || '（非文字訊息）',
+    });
+  }
 
   // ─── Telegram ────────────────────────────────────────────────
   function sendTelegram(pageName, sender, messageText) {
@@ -264,9 +291,15 @@
     } catch (e) { if (isContextError(e)) killScript(); }
   }
 
-  // ─── Title watch ──────────────────────────────────────────────
-  let _lastTitleCount = 0;
+  // ─── Unified new-message handler ──────────────────────────────
+  function onNewMessage(sender, messageText, pageName) {
+    sendTelegram(pageName, sender, messageText);
+    playAudioInContent();
+    fireNotification(sender, messageText);
+    safeSend({ type: 'NEW_MESSAGE', senderName: sender, messageText, pageName, pageUrl: getPageUrl() });
+  }
 
+  // ─── Title watch ──────────────────────────────────────────────
   function getTitleCount() {
     const m = document.title.match(/\((\d+)\)/);
     return m ? parseInt(m[1]) : 0;
@@ -275,6 +308,7 @@
   function onTitleChange() {
     try {
       if (!alive() || _cfg.enabled === false || !_firstScanDone) return;
+      checkAssetId();
       const count = getTitleCount();
       if (count > _lastTitleCount) {
         _lastTitleCount = count;
@@ -289,16 +323,16 @@
           const isOutgoing = data.messageText.startsWith('你:') || data.messageText.startsWith('You:');
           if (isOutgoing) continue;
           if (shouldNotify(data.sender, data.messageText, data.dataUtime)) {
-            sendTelegram(pageName, data.sender, data.messageText);
-            playAudioInContent();
-            safeSend({ type: 'NEW_MESSAGE', senderName: data.sender, messageText: data.messageText, pageName, pageUrl: getPageUrl() });
+            onNewMessage(data.sender, data.messageText, pageName);
             foundAny = true;
           }
         }
-        if (!foundAny && shouldNotify('__offscreen__', String(count), 0)) {
-          sendTelegram(pageName, '（未知）', '（新訊息在畫面外，請捲動查看）');
-          playAudioInContent();
-          safeSend({ type: 'NEW_MESSAGE', senderName: '未知', messageText: '（新訊息在畫面外）', pageName, pageUrl: getPageUrl() });
+        if (!foundAny) {
+          // M2: offscreen dedup — use 2-minute time bucket so same count can re-notify after 2min
+          const bucket = Math.floor(Date.now() / 120000);
+          if (shouldNotify('__offscreen__', `${count}|${bucket}`, 0)) {
+            onNewMessage('（未知）', '（新訊息在畫面外，請捲動查看）', pageName);
+          }
         }
         safeSend({ type: 'UNREAD_STATUS', hasUnread: true });
       }
@@ -309,11 +343,10 @@
   }
 
   // ─── Scan ─────────────────────────────────────────────────────
-  let _firstScanDone = false;
-
   function scanThreads() {
     try {
       if (!alive() || _cfg.enabled === false) return;
+      checkAssetId(); // H1: detect SPA fan-page switch
       const titleEls = Array.from(document.querySelectorAll(
         '[data-surface*="thread_list/thread_row"][data-surface*="thread_title"]'
       ));
@@ -328,17 +361,14 @@
         const prev = threadState[key];
         if (data.unread) hasAnyUnread = true;
         const isOutgoing = data.messageText.startsWith('你:') || data.messageText.startsWith('You:');
-        // Only notify on truly new messages: new thread or newer timestamp
-        // Removed messageText diff — FB re-renders text each scan causing false duplicates
-        const isNewMessage = _firstScanDone && data.unread && !isOutgoing && (
-          !prev ||
-          (data.dataUtime > 0 && data.dataUtime > (prev.dataUtime || 0))
-        );
+
+        // M3: utime=0 fallback — treat unread false→true as new message signal
+        const utimeNew = data.dataUtime > 0 && data.dataUtime > (prev ? prev.dataUtime || 0 : 0);
+        const unreadEdge = data.dataUtime === 0 && data.unread && prev && !prev.unread;
+
+        const isNewMessage = _firstScanDone && data.unread && !isOutgoing && (!prev || utimeNew || unreadEdge);
         if (isNewMessage && shouldNotify(data.sender, data.messageText, data.dataUtime)) {
-          const pageName = getPageName();
-          sendTelegram(pageName, data.sender, data.messageText);
-          playAudioInContent();
-          safeSend({ type: 'NEW_MESSAGE', senderName: data.sender, messageText: data.messageText, pageName, pageUrl: getPageUrl() });
+          onNewMessage(data.sender, data.messageText, getPageName());
         }
         threadState[key] = { sender: data.sender, previewText: data.messageText, dataUtime: data.dataUtime, unread: data.unread };
       }
@@ -351,12 +381,12 @@
 
   // ─── Init ────────────────────────────────────────────────────
   function safeCall(fn) {
-    if (!onValidPage()) return;  // SPA nav away from inbox: skip but preserve _notified state
+    if (!onValidPage()) return;
     try { fn(); } catch (e) { if (isContextError(e)) killScript(); }
   }
 
   function init() {
-    // Set baseline immediately so MutationObserver doesn't fire with stale 0 during init
+    _currentAssetId = getCurrentAssetId();
     _lastTitleCount = getTitleCount();
     const titleEl = document.querySelector('title');
     if (titleEl) {

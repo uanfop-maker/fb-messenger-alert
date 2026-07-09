@@ -1,6 +1,6 @@
 'use strict';
-// FB Alert Background Service Worker v4.8.9
-// Audio is now played directly by content.js; background manages alarms + keepalive
+// FB Alert Background Service Worker v4.10.0
+// Changes: multi-tab unread map / system notification fallback / keepalive 30s
 
 let _s = {};
 chrome.storage.sync.get(null, (d) => { _s = d || {}; });
@@ -11,10 +11,17 @@ chrome.storage.onChanged.addListener((changes, area) => {
   }
 });
 
-// Keep SW alive every 24s so Chrome doesn't terminate it and kill content script ports
-chrome.alarms.create('keepalive', { periodInMinutes: 0.4 });
+// L1: keepalive every 30s (was 24s which is below Chrome alarm minimum)
+chrome.alarms.create('keepalive', { periodInMinutes: 0.5 });
 
-let _hasUnread = false;
+// M1: per-tab unread map so multiple tabs don't clobber each other
+const _unreadTabs = new Map();
+let _prevAnyUnread = false;
+
+function hasAnyUnread() {
+  for (const v of _unreadTabs.values()) if (v) return true;
+  return false;
+}
 
 function inSleepWindow() {
   const { sleepStart, sleepEnd } = _s;
@@ -28,16 +35,23 @@ function inSleepWindow() {
   return s <= e ? (cur >= s && cur < e) : (cur >= s || cur < e);
 }
 
-// Send PLAY_AUDIO to content script (tab ID persisted in storage across SW restarts)
+// Broadcast PLAY_AUDIO to all tabs that currently have unread
 async function playSound() {
-  const data = await chrome.storage.local.get('_fbTabId');
-  if (!data._fbTabId) return;
-  chrome.tabs.sendMessage(data._fbTabId, { type: 'PLAY_AUDIO' }).catch(() => {});
+  const unreadTabIds = [..._unreadTabs.entries()].filter(([, u]) => u).map(([id]) => id);
+  if (unreadTabIds.length) {
+    for (const tabId of unreadTabIds) {
+      chrome.tabs.sendMessage(tabId, { type: 'PLAY_AUDIO' }).catch(() => {});
+    }
+    return;
+  }
+  // Fallback: last known tab (persisted across SW restarts)
+  const d = await chrome.storage.local.get('_fbTabId');
+  if (d._fbTabId) chrome.tabs.sendMessage(d._fbTabId, { type: 'PLAY_AUDIO' }).catch(() => {});
 }
 
 function updateAlarms() {
   const mode = _s.soundMode || 'once';
-  if (mode === 'continuous' && _hasUnread) {
+  if (mode === 'continuous' && hasAnyUnread()) {
     const sec = Math.max(5, parseInt(_s.beepIntervalSec) || 15);
     chrome.alarms.create('beepAlarm', { periodInMinutes: sec / 60 });
   } else {
@@ -46,28 +60,42 @@ function updateAlarms() {
 }
 
 chrome.alarms.onAlarm.addListener(async (alarm) => {
-  if (alarm.name === 'keepalive') return; // just wakes SW, nothing to do
+  if (alarm.name === 'keepalive') return;
   if (alarm.name !== 'beepAlarm') return;
-  if (!_hasUnread) { chrome.alarms.clear('beepAlarm'); return; }
+  if (!hasAnyUnread()) { chrome.alarms.clear('beepAlarm'); return; }
   if (!inSleepWindow()) await playSound();
 });
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  // Persist tab ID so we can reach content script after SW restart
   if (sender && sender.tab) {
     chrome.storage.local.set({ _fbTabId: sender.tab.id });
   }
 
   if (msg.type === 'NEW_MESSAGE') {
-    const mode = _s.soundMode || 'once';
-    if (mode === 'continuous') updateAlarms();
+    if (_s.soundMode === 'continuous') updateAlarms();
     return false;
   }
 
   if (msg.type === 'UNREAD_STATUS') {
-    const prev = _hasUnread;
-    _hasUnread = msg.hasUnread;
-    if (prev !== _hasUnread) updateAlarms();
+    if (sender && sender.tab) {
+      _unreadTabs.set(sender.tab.id, msg.hasUnread);
+    }
+    const now = hasAnyUnread();
+    if (now !== _prevAnyUnread) {
+      _prevAnyUnread = now;
+      updateAlarms();
+    }
+    return false;
+  }
+
+  // H2: system notification when AudioContext blocked by autoplay policy
+  if (msg.type === 'SHOW_NOTIFICATION') {
+    chrome.notifications.create('fb-alert-' + Date.now(), {
+      type: 'basic',
+      iconUrl: 'icon48.png',
+      title: msg.title || 'FB 新私訊',
+      message: msg.body || '有新訊息',
+    });
     return false;
   }
 
@@ -78,7 +106,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   if (msg.type === 'TEST_TG') {
     const { botToken, chatId, threadId } = msg;
-    const body = { chat_id: chatId, text: '✅ FB Messenger 提醒 v4.9.0 測試成功！' };
+    const body = { chat_id: chatId, text: '✅ FB Messenger 提醒 v4.10.0 測試成功！' };
     if (threadId) body.message_thread_id = parseInt(threadId, 10);
     fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
       method: 'POST',
