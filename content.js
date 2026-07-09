@@ -1,4 +1,4 @@
-// FB Alert Content Script v4.8.9 — keepalive port reconnect + audio resume fix + TG dedup fix
+// FB Alert Content Script v4.9.0 — singleton AudioContext unlocked by user gesture
 (function () {
   'use strict';
 
@@ -171,25 +171,44 @@
     return s <= e ? (cur >= s && cur < e) : (cur >= s || cur < e);
   }
 
-  // Original v4.6 beep: 880→1100→880Hz oscillator, 0.6s (Web Audio API)
-  // resume() must complete before scheduling notes — ctx.currentTime is frozen while suspended
+  // Singleton AudioContext — created once, unlocked by first user gesture on the FB page
+  let _actx = null;
+  function _getCtx() {
+    if (!_actx) {
+      try { _actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {}
+    }
+    return _actx;
+  }
+  // Unlock on any user interaction so ctx.state becomes 'running'
+  ['click', 'keydown', 'pointerdown'].forEach(function (ev) {
+    document.addEventListener(ev, function _unlock() {
+      const c = _getCtx();
+      if (c && c.state === 'suspended') c.resume().catch(() => {});
+      document.removeEventListener(ev, _unlock);
+    }, { once: true, passive: true, capture: true });
+  });
+
+  // Original v4.6 beep: 880→1100→880Hz oscillator, 0.6s
+  // Falls back to sound1.wav if AudioContext is still suspended (no user gesture yet)
   function playOriginalBeep() {
     try {
-      const ctx = new AudioContext();
-      ctx.resume().then(() => {
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        const t = ctx.currentTime;
-        osc.frequency.setValueAtTime(880, t);
-        osc.frequency.setValueAtTime(1100, t + 0.12);
-        osc.frequency.setValueAtTime(880, t + 0.24);
-        gain.gain.setValueAtTime(0.6, t);
-        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.6);
-        osc.start(t);
-        osc.stop(t + 0.6);
-      }).catch(() => {});
+      const ctx = _getCtx();
+      if (!ctx || ctx.state === 'suspended') {
+        new Audio(chrome.runtime.getURL('sound1.wav')).play().catch(() => {});
+        return;
+      }
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      const t = ctx.currentTime;
+      osc.frequency.setValueAtTime(880, t);
+      osc.frequency.setValueAtTime(1100, t + 0.12);
+      osc.frequency.setValueAtTime(880, t + 0.24);
+      gain.gain.setValueAtTime(0.6, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.6);
+      osc.start(t);
+      osc.stop(t + 0.6);
     } catch (e) {}
   }
 

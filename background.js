@@ -78,7 +78,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   if (msg.type === 'TEST_TG') {
     const { botToken, chatId, threadId } = msg;
-    const body = { chat_id: chatId, text: '✅ FB Messenger 提醒 v4.8.9 測試成功！' };
+    const body = { chat_id: chatId, text: '✅ FB Messenger 提醒 v4.9.0 測試成功！' };
     if (threadId) body.message_thread_id = parseInt(threadId, 10);
     fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
       method: 'POST',
