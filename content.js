@@ -1,5 +1,6 @@
-// FB Alert Content Script v4.10.0
+// FB Alert Content Script v4.11.0
 // Fixes: H1 SPA soft-reset / H2 system-notification fallback / M2 offscreen dedup / M3 utime=0 edge
+// v4.11.0: 粉專分類群組 — 依 ID/名稱比對群組標籤，附加到通知的粉絲頁名稱後面
 (function () {
   'use strict';
 
@@ -124,6 +125,15 @@
   function getPageUrl() {
     const m = location.href.match(/asset_id=(\d+)/);
     return m ? `https://business.facebook.com/latest/inbox/messenger?asset_id=${m[1]}` : location.href;
+  }
+
+  // 先比對 ID，比對不到才比對名稱（名稱可留空）
+  function resolveGroup(assetId, pageName) {
+    const rows = _cfg.pageGroups;
+    if (!Array.isArray(rows)) return '';
+    let m = rows.find((r) => r.id && String(r.id) === String(assetId));
+    if (!m) m = rows.find((r) => r.name && r.name === pageName);
+    return (m && m.group) || '';
   }
 
   // ─── DOM helpers ─────────────────────────────────────────────
@@ -274,8 +284,10 @@
     try {
       const { botToken, chatId, threadId, tgEnabled } = _cfg;
       if (tgEnabled === false || !botToken || !chatId) return;
+      const group = resolveGroup(_currentAssetId, pageName);
+      const displayName = (pageName || '未知') + (group ? `(${group})` : '');
       const text = [
-        `🏪 粉絲頁：${pageName || '未知'}`,
+        `🏪 粉絲頁：${displayName}`,
         `👤 發訊者：${sender || '訪客'}`,
         `💬 ${messageText || '（非文字訊息）'}`,
         `🔗 ${getPageUrl()}`,

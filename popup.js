@@ -38,6 +38,26 @@ function updateChoiceUI() {
   $('customSoundSection').style.display = _soundChoice === 'custom' ? '' : 'none';
 }
 
+// ─── Page groups (分類群組) ────────────────────────────────────
+function parsePageGroups(text) {
+  const rows = [];
+  text.split('\n').forEach((line) => {
+    const parts = line.split(/\t|,/).map((s) => s.trim());
+    let name = '', id = '', group = '';
+    if (parts.length >= 3) [name, id, group] = parts;
+    else if (parts.length === 2) [id, group] = parts;
+    else return;
+    if (!/^\d+$/.test(id) || !group) return; // 跳過表頭或無效行
+    rows.push({ name, id, group });
+  });
+  return rows;
+}
+
+chrome.storage.sync.get(['pageGroups'], (d) => {
+  const rows = Array.isArray(d.pageGroups) ? d.pageGroups : [];
+  $('pageGroups').value = rows.map((r) => [r.name || '', r.id || '', r.group || ''].join(',')).join('\n');
+});
+
 // ─── Load saved config ────────────────────────────────────────
 chrome.storage.sync.get(KEYS, (data) => {
   $('botToken').value = data.botToken || '';
@@ -73,6 +93,7 @@ $('saveBtn').addEventListener('click', () => {
     beepIntervalSec: parseInt($('beepIntervalSec').value) || 15,
     sleepStart: $('sleepStart').value,
     sleepEnd: $('sleepEnd').value,
+    pageGroups: parsePageGroups($('pageGroups').value),
   };
   chrome.storage.sync.set(cfg, () => {});
   chrome.storage.local.set({ soundChoice: _soundChoice }, () => showStatus('✅ 已儲存'));

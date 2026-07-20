@@ -1,5 +1,5 @@
 'use strict';
-// FB Alert Background Service Worker v4.10.0
+// FB Alert Background Service Worker v4.11.0
 // Changes: multi-tab unread map / system notification fallback / keepalive 30s
 
 let _s = {};
@@ -106,7 +106,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   if (msg.type === 'TEST_TG') {
     const { botToken, chatId, threadId } = msg;
-    const body = { chat_id: chatId, text: '✅ FB Messenger 提醒 v4.10.0 測試成功！' };
+    const body = { chat_id: chatId, text: '✅ FB Messenger 提醒 v4.11.0 測試成功！' };
     if (threadId) body.message_thread_id = parseInt(threadId, 10);
     fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
       method: 'POST',
