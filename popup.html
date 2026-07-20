@@ -68,6 +68,24 @@ textarea {
   padding: 8px 10px; outline: none; margin-bottom: 4px; resize: vertical;
 }
 textarea:focus { border-color: #0866ff; }
+.group-table { display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; }
+.group-table-header { display: flex; gap: 4px; padding: 0 2px; margin-bottom: 2px; }
+.group-table-header span { font-size: 10px; color: #666; }
+.group-table-header span.gname, .group-row .gname { flex: 1.3; }
+.group-table-header span.gid, .group-row .gid { flex: 1.8; }
+.group-table-header span.ggroup, .group-row .ggroup { flex: 0.8; }
+.group-row { display: flex; gap: 4px; align-items: center; }
+.group-row input {
+  min-width: 0; background: #242526; border: 1px solid #3a3b3c;
+  border-radius: 6px; color: #e4e6eb; font-size: 12px;
+  padding: 6px 8px; outline: none;
+}
+.group-row input:focus { border-color: #0866ff; }
+.group-row .gdel {
+  flex: 0 0 22px; width: 22px; height: 22px; border: none; border-radius: 6px;
+  background: transparent; color: #777; cursor: pointer; font-size: 13px; padding: 0;
+}
+.group-row .gdel:hover { color: #e05252; background: #e0525222; }
 .hidden { display: none; }
 .ver { font-size: 10px; color: #444; text-align: right; margin-top: 10px; }
 .sound-row { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
@@ -79,7 +97,7 @@ textarea:focus { border-color: #0866ff; }
 </style>
 </head>
 <body>
-<h2>📨 FB Messenger 提醒 <span style="font-size:11px;color:#555;font-weight:400">v4.11.0</span></h2>
+<h2>📨 FB Messenger 提醒 <span style="font-size:11px;color:#555;font-weight:400">v4.12.0</span></h2>
 
 <div class="section">
   <label>
@@ -147,8 +165,16 @@ textarea:focus { border-color: #0866ff; }
 
 <div class="section">
   <div class="section-title">粉專分類群組</div>
-  <textarea id="pageGroups" rows="5" placeholder="一行一筆，格式：名稱,ID,群組（名稱可留空）&#10;例如：&#10;慢序選物所,101292869018588,Y"></textarea>
-  <p class="hint">從 Excel / Google 試算表複製貼上也可以（Tab 分隔）。比對順序：先比對 ID，比對不到才比對名稱；名稱可留空只填 ID,群組。通知會顯示「粉絲頁：名稱(群組)」。</p>
+  <div class="group-table-header">
+    <span class="gname">粉專名稱</span><span class="gid">Page ID</span><span class="ggroup">群組</span><span style="flex:0 0 22px"></span>
+  </div>
+  <div id="groupTable" class="group-table"></div>
+  <p class="hint">打最後一列會自動長出下一列；按 ✕ 刪除該列。</p>
+
+  <p class="hint" style="margin-top:10px">快速貼上（解析後會覆蓋上面的表格）：</p>
+  <textarea id="pageGroups" rows="3" placeholder="一行一筆，格式：名稱,ID,群組（名稱可留空）&#10;例如：&#10;慢序選物所,101292869018588,Y"></textarea>
+  <button class="btn sec" id="parsePasteBtn">📋 解析貼上內容 → 覆蓋表格</button>
+  <p class="hint">從 Excel / Google 試算表複製貼上也可以（Tab 分隔）。比對順序：先比對 ID，比對不到才比對名稱；名稱可留空。通知會顯示「粉絲頁：名稱(群組)」。</p>
 </div>
 
 <hr>
@@ -171,7 +197,7 @@ textarea:focus { border-color: #0866ff; }
 </div>
 
 <div class="status" id="status"></div>
-<div class="ver">v4.11.0</div>
+<div class="ver">v4.12.0</div>
 
 <script src="popup.js"></script>
 </body>

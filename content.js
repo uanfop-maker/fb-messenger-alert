@@ -1,6 +1,7 @@
-// FB Alert Content Script v4.11.0
+// FB Alert Content Script v4.12.0
 // Fixes: H1 SPA soft-reset / H2 system-notification fallback / M2 offscreen dedup / M3 utime=0 edge
 // v4.11.0: 粉專分類群組 — 依 ID/名稱比對群組標籤，附加到通知的粉絲頁名稱後面
+// v4.12.0: popup 分類群組改為動態表格 UI（自動長列＋刪除鈕），底層資料格式不變
 (function () {
   'use strict';
 

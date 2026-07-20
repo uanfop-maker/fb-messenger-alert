@@ -38,7 +38,9 @@ function updateChoiceUI() {
   $('customSoundSection').style.display = _soundChoice === 'custom' ? '' : 'none';
 }
 
-// ─── Page groups (分類群組) ────────────────────────────────────
+// ─── Page groups (分類群組) — dynamic table ───────────────────
+let _groups = [];
+
 function parsePageGroups(text) {
   const rows = [];
   text.split('\n').forEach((line) => {
@@ -53,9 +55,70 @@ function parsePageGroups(text) {
   return rows;
 }
 
+function cleanGroups(rows) {
+  return rows
+    .map((r) => ({ name: (r.name || '').trim(), id: (r.id || '').trim(), group: (r.group || '').trim() }))
+    .filter((r) => /^\d+$/.test(r.id) && r.group);
+}
+
+function buildGroupRow(row) {
+  const div = document.createElement('div');
+  div.className = 'group-row';
+  div.innerHTML =
+    '<input class="gname" type="text" placeholder="粉專名稱（可留空）">' +
+    '<input class="gid" type="text" placeholder="Page ID">' +
+    '<input class="ggroup" type="text" placeholder="群組">' +
+    '<button class="gdel" type="button" title="刪除這列">✕</button>';
+  const nameInput = div.querySelector('.gname');
+  const idInput = div.querySelector('.gid');
+  const groupInput = div.querySelector('.ggroup');
+  nameInput.value = row.name;
+  idInput.value = row.id;
+  groupInput.value = row.group;
+  nameInput.addEventListener('input', () => { row.name = nameInput.value; maybeGrow(row); });
+  idInput.addEventListener('input', () => { row.id = idInput.value; maybeGrow(row); });
+  groupInput.addEventListener('input', () => { row.group = groupInput.value; maybeGrow(row); });
+  div.querySelector('.gdel').addEventListener('click', () => {
+    const idx = _groups.indexOf(row);
+    if (idx === -1) return;
+    _groups.splice(idx, 1);
+    if (_groups.length === 0) _groups.push({ name: '', id: '', group: '' });
+    renderGroupTable();
+  });
+  return div;
+}
+
+// 只有「目前最後一列」被打字，且該列至少有一格非空，才自動 append 一條新空白列
+// append 而非整表重繪，這樣打字中不會斷焦點/跳游標
+function maybeGrow(row) {
+  const idx = _groups.indexOf(row);
+  if (idx === -1 || idx !== _groups.length - 1) return;
+  if (!row.name && !row.id && !row.group) return;
+  const newRow = { name: '', id: '', group: '' };
+  _groups.push(newRow);
+  $('groupTable').appendChild(buildGroupRow(newRow));
+}
+
+function renderGroupTable() {
+  const container = $('groupTable');
+  container.innerHTML = '';
+  _groups.forEach((row) => container.appendChild(buildGroupRow(row)));
+}
+
 chrome.storage.sync.get(['pageGroups'], (d) => {
-  const rows = Array.isArray(d.pageGroups) ? d.pageGroups : [];
-  $('pageGroups').value = rows.map((r) => [r.name || '', r.id || '', r.group || ''].join(',')).join('\n');
+  const saved = Array.isArray(d.pageGroups) ? d.pageGroups : [];
+  _groups = saved.length
+    ? saved.map((r) => ({ name: r.name || '', id: r.id || '', group: r.group || '' }))
+    : [{ name: '', id: '', group: '' }];
+  renderGroupTable();
+});
+
+// 「解析貼上內容」：把快速貼上文字框的內容解析後覆蓋整個表格
+$('parsePasteBtn').addEventListener('click', () => {
+  const rows = parsePageGroups($('pageGroups').value);
+  _groups = rows.length ? rows : [{ name: '', id: '', group: '' }];
+  renderGroupTable();
+  showStatus(rows.length ? `✅ 已解析 ${rows.length} 筆，記得按「儲存設定」` : '⚠️ 沒解析到有效的列', !rows.length);
 });
 
 // ─── Load saved config ────────────────────────────────────────
@@ -93,7 +156,7 @@ $('saveBtn').addEventListener('click', () => {
     beepIntervalSec: parseInt($('beepIntervalSec').value) || 15,
     sleepStart: $('sleepStart').value,
     sleepEnd: $('sleepEnd').value,
-    pageGroups: parsePageGroups($('pageGroups').value),
+    pageGroups: cleanGroups(_groups),
   };
   chrome.storage.sync.set(cfg, () => {});
   chrome.storage.local.set({ soundChoice: _soundChoice }, () => showStatus('✅ 已儲存'));
