@@ -275,7 +275,6 @@
       const { botToken, chatId, threadId, tgEnabled } = _cfg;
       if (tgEnabled === false || !botToken || !chatId) return;
       const text = [
-        '📨 FB 私訊通知',
         `🏪 粉絲頁：${pageName || '未知'}`,
         `👤 發訊者：${sender || '訪客'}`,
         `💬 ${messageText || '（非文字訊息）'}`,
